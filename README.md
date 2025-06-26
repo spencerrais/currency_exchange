@@ -61,11 +61,13 @@
 #### First Migration: Tables
 
 ```sql
+-- currency name in the source is sometimes NULL
 CREATE TABLE IF NOT EXISTS currency (
     currency_symbol VARCHAR(3) PRIMARY KEY,
-    currency_name VARCHAR(255) NOT NULL
+    currency_name VARCHAR(255)
 );
 
+-- pk and fk both enabled, none of the data is NULL
 CREATE TABLE IF NOT EXISTS exchange_rates (
     currency_symbol VARCHAR(3) NOT NULL,
     rate_date DATE NOT NULL,
@@ -77,7 +79,7 @@ CREATE TABLE IF NOT EXISTS exchange_rates (
 
 ## Python Usage
 
-From the root project directory:
+From the root project directory (ensure python is installed):
 
 ```bash
 python3 -m venv .venv
@@ -86,30 +88,48 @@ pip install -r requirements.txt
 python main.py
 ```
 
-This will download the file from Kaggle to S3, insert the data into Postgres, and
-create the export report as a CSV in S3.
+`main.py` is simply a call to python functions living in subdirectories:
+```python
+from data.download import download_and_upload_kaggle_dataset
+from db.export import export_view_to_s3
+from db.load import load_csv_to_postgres
+
+if __name__ == "__main__":
+    download_and_upload_kaggle_dataset()
+    load_csv_to_postgres()
+    export_view_to_s3()
+```
+
+The called functions handle the ingestion of the file from Kaggle to S3,
+insertion of the data into Postgres, and
+the creation of the export report as a CSV in S3.
+
 
 ## SQL Queries
 
 ### 1. Currency Momentum Metrics
 
-Top 5 currencies by `avg_cons_pos_days` and `avg_cons_perc_change`
+Top 5 currencies by `avg_cons_pos_days` and `avg_cons_perc_change`.
+The query could be condensed a little bit, but for the ease of
+comprehension some extra CTEs have been added.
 
-Notes: No check for missing days; consecutive days only.
 
 ```sql
+-- capture the rates that changed
 WITH rate_changes AS
 (
   SELECT currency_symbol, rate_date, exchange_rate,
          LAG(exchange_rate) OVER (PARTITION BY currency_symbol ORDER BY rate_date) AS prev_rate
   FROM exchange_rates
 ),
+-- label the days which have an increase
 streak_flags AS
 (
   SELECT currency_symbol, rate_date, exchange_rate, prev_rate,
          CASE WHEN exchange_rate > prev_rate THEN 1 ELSE 0 END AS is_increase
   FROM rate_changes
 ),
+-- each distinct group is calculated with default ROWS UNBOUNDED PRECEDING AND CURRENT ROW
 streak_groups AS
 (
   SELECT currency_symbol, rate_date, exchange_rate, is_increase,
@@ -117,6 +137,8 @@ streak_groups AS
          OVER (PARTITION BY currency_symbol ORDER BY rate_date) AS streak_group
   FROM streak_flags
 ),
+-- MINs work because each day is an increase for the rate
+-- grab the streak length and add 1 for the initial day
 positive_streaks AS
 (
   SELECT currency_symbol, streak_group, COUNT(*) + 1 AS streak_length,
@@ -127,6 +149,7 @@ positive_streaks AS
   GROUP BY currency_symbol, streak_group
   HAVING COUNT(*) >= 1
 ),
+-- calculate the metrics, rounded to 4 decimal places
 aggregated AS
 (
   SELECT currency_symbol,
@@ -135,6 +158,7 @@ aggregated AS
   FROM positive_streaks
   GROUP BY currency_symbol
 ),
+-- utilize RANK so that any ties (unlikely) are marked as ties
 ranked AS
 (
   SELECT currency_symbol, avg_cons_pos_days, avg_cons_perc_change,
@@ -143,6 +167,7 @@ ranked AS
   FROM aggregated
 )
 
+-- UNION all of the top 5 for each respective metric
 SELECT currency_symbol, avg_cons_pos_days, avg_cons_perc_change,
        avg_cons_pos_days_rank, avg_cons_perc_change_rank
 FROM ranked
@@ -164,6 +189,7 @@ Grouped currencies by:
 * Daily trend strength (percentage of positive days)
 
 ```sql
+-- calculcate the percentage change for each day
 WITH daily_returns AS
 (
   SELECT currency_symbol, rate_date,
@@ -174,19 +200,16 @@ WITH daily_returns AS
          ) * 100 AS pct_change
   FROM exchange_rates
 ),
-filtered_returns AS
-(
-  SELECT currency_symbol, rate_date, pct_change
-  FROM daily_returns
-  WHERE pct_change IS NOT NULL
-),
+-- volatility is based on the avg percentage change
 volatility AS
 (
   SELECT currency_symbol,
          ROUND(AVG(ABS(pct_change))::numeric, 5) AS avg_daily_volatility
   FROM filtered_returns
+  WHERE pct_change IS NOT NULL
   GROUP BY currency_symbol
 ),
+-- trend calculates the amount of positive trend days
 trend_stats AS
 (
   SELECT currency_symbol,
@@ -197,6 +220,7 @@ trend_stats AS
   FROM filtered_returns
   GROUP BY currency_symbol
 ),
+-- combine both metrics
 combined AS
 (
   SELECT v.currency_symbol, v.avg_daily_volatility, t.net_trend_strength
@@ -204,6 +228,7 @@ combined AS
   JOIN trend_stats t ON v.currency_symbol = t.currency_symbol
 )
 
+-- add buckets for the different metrics
 SELECT currency_symbol, avg_daily_volatility, net_trend_strength,
        CASE WHEN avg_daily_volatility > 1 THEN 'Volatile' ELSE 'Stable' END AS volatility_cluster,
        CASE
@@ -233,6 +258,7 @@ WITH rate_changes AS
            PARTITION BY currency_symbol ORDER BY rate_date
          ) AS prev_rate
   FROM exchange_rates
+  -- this filter ensures we are only using yesterday's data
   WHERE rate_date < CURRENT_DATE
 ),
 ...
@@ -253,6 +279,7 @@ SELECT
   r.avg_cons_perc_change_rank,
   y.yesterday_avg_cons_perc_change_rank
 FROM ranked AS r
+-- join yesterdays data
 LEFT JOIN yesterday_report_view AS y ON r.currency_symbol = y.currency_symbol
 WHERE r.avg_cons_perc_change_rank <= 10
 ORDER BY r.avg_cons_perc_change_rank;
@@ -266,11 +293,13 @@ captured so that there is no need to calculate the day more than once.
 ```bash
 psql -h $RDS_HOST -U $RDS_USERNAME -d $RDS_NAME -p $RDS_PORT
 ```
+Simply enter your username and work inside of psql as desired.
 
-Then inside `psql`:
+I prefer to write `.sql` files and simply utilize the following pattern for
+running those queries.
 
-```sql
-\dt  -- list tables
+```bash
+\i /path/to/file.sql
 ```
 
 ## Destroy Resources
