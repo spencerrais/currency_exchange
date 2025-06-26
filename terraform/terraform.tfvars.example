@@ -1,0 +1,6 @@
+aws_region      = "us-west-2"
+db_name         = "kaggle_db"
+db_username     = "postgres"
+db_password     = "REPLACE_ME"
+s3_bucket_name  = "kaggle-dataset-upload-unique"
+env             = "dev"

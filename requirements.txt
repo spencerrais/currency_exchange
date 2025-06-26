@@ -1,0 +1,5 @@
+alembic
+boto3
+kaggle
+pandas
+psycopg2-binary
