@@ -188,6 +188,12 @@ Grouped currencies by:
 * Average daily volatility
 * Daily trend strength (percentage of positive days)
 
+The reason I selected these metrics is because they are both
+related, but also because if someone is looking at extraction
+of value then having knowledge of any currencies with a high
+daily volatility and a strong daily trend can allow for the
+exploitation of movements against the general trend. (NFA)
+
 ```sql
 -- calculcate the percentage change for each day
 WITH daily_returns AS
