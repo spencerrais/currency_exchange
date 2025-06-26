@@ -27,7 +27,7 @@
 * Add your development IP automatically:
 
   ```bash
-  echo "dev_ip = \"$(curl -s ifconfig.me)/32\"" >> terraform.auto.tfvars
+  echo "dev_ip = \"$(curl -4 -s ifconfig.me)/32\"" >> terraform.auto.tfvars
   ```
 
 ### 5. Terraform Execution
@@ -47,6 +47,19 @@
   ```bash
   echo "RDS_HOST=$(terraform output -raw rds_host)" >> ../.env
   ```
+
+### 6. Package Installation
+
+From the root project directory (ensure python is installed):
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+```
+
+Follow the instructions for your machine to install alembic, psycopg2, and
+the needed library to have access to psql.
 
 ## Database & Migrations
 
@@ -79,12 +92,9 @@ CREATE TABLE IF NOT EXISTS exchange_rates (
 
 ## Python Usage
 
-From the root project directory (ensure python is installed):
+From the root project directory.
 
 ```bash
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
 python main.py
 ```
 
