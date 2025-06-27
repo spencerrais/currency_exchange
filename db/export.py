@@ -1,5 +1,6 @@
 import io
 import os
+from datetime import date
 
 import boto3
 import pandas as pd
@@ -19,6 +20,7 @@ def export_view_to_s3():
     buffer = io.BytesIO()
     df.to_csv(buffer, index=False)
     buffer.seek(0)
+    file_name = f"daily_report_{date.today()}.csv"
 
     s3 = boto3.client("s3")
-    s3.upload_fileobj(buffer, os.environ.get("S3_BUCKET"), "exports/daily_report.csv")
+    s3.upload_fileobj(buffer, os.environ.get("S3_BUCKET"), f"exports/{file_name}")

@@ -1,5 +1,6 @@
 import pandas as pd
 import psycopg2
+from datetime import date
 from psycopg2.extras import execute_values
 import os
 
@@ -48,7 +49,7 @@ def load_csv_to_postgres():
             row["exchange_rate"],
         )
         for _, row in df.iterrows()
-        if pd.notna(row["currency"]) and pd.notna(row["exchange_rate"])
+        if pd.notna(row["currency"]) and pd.notna(row["exchange_rate"]) and row["date"].date() == date.today()
     ]
     batched_execute_values(
         cur,
